@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables (Keep your passwords secret!)
+.env
+
+# Uploaded test images from our chat feature
+backend/uploads/
+
+# Build files
+build/
+dist/
+
+# OS generated files
+.DS_Store
+Thumbs.db
