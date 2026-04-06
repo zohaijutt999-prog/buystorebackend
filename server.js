@@ -5,15 +5,33 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Load environment variables (Required for live deployment)
+// Load environment variables
 require('dotenv').config();
 
 const app = express();
 
-// Allow all cross-origin requests for Local Development
+// --- FIXED CORS CONFIGURATION ---
+const allowedOrigins = [
+  'https://buystore.io',
+  'https://www.buystore.io',
+  'http://localhost:5173', // Local development (Vite) ke liye
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin: ['https://yourwebsite.com', 'https://www.yourwebsite.com'] // Apna live frontend URL dalein
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
 }));
+
 app.use(express.json()); 
 
 // --- SERVE UPLOADED IMAGES ---
@@ -34,7 +52,6 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // --- DATABASE CONNECTION ---
-// Uses live environment variables, falls back to XAMPP for local dev
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',      
@@ -49,8 +66,9 @@ pool.getConnection()
   .then(() => console.log('✅ Connected to MySQL Database Successfully!'))
   .catch((err) => console.error('❌ MySQL Connection Error:', err));
 
+// --- ROUTES (Same as your logic) ---
 
-// --- 1. AUTHENTICATION ROUTES ---
+// 1. AUTHENTICATION ROUTES
 app.post('/api/register/customer', async (req, res) => {
   try {
     const { fullName, email, phoneNumber, password } = req.body;
@@ -89,8 +107,7 @@ app.post('/api/login/seller', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
 
-
-// --- 2. PRODUCT ROUTES ---
+// 2. PRODUCT ROUTES
 app.get('/api/products/all', async (req, res) => {
   try {
     const [products] = await pool.execute(`
@@ -113,10 +130,8 @@ app.get('/api/seller/products/:sellerId', async (req, res) => {
 app.post('/api/seller/products', upload.single('productImage'), async (req, res) => {
   try {
     const { seller_id, title, category, price, stock_qty, description, profit, existing_image_url } = req.body;
-    
-    // Dynamic Image URL using environment variable
-    const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
-    let image_url = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=300&q=80"; // Default
+    const baseUrl = process.env.BACKEND_URL || 'https://backend.buystore.io';
+    let image_url = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=300&q=80"; 
     
     if (req.file) {
       image_url = `${baseUrl}/uploads/${req.file.filename}`;
@@ -134,8 +149,7 @@ app.post('/api/seller/products', upload.single('productImage'), async (req, res)
   }
 });
 
-
-// --- 3. PROFILE UPDATE ROUTES ---
+// PROFILE UPDATE ROUTES
 app.put('/api/seller/profile/:id', async (req, res) => {
   try {
     const { fullName, phoneNumber, email } = req.body;
@@ -160,14 +174,11 @@ app.put('/api/customer/profile/:id', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Server Error', error: error.message }); }
 });
 
-
-// --- 4. CHAT ROUTES ---
+// CHAT ROUTES
 app.post('/api/chat', upload.single('chatImage'), async (req, res) => {
   try {
     const { customer_id, seller_id, sender, message, existing_image_url } = req.body;
-    
-    // Dynamic Image URL using environment variable
-    const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+    const baseUrl = process.env.BACKEND_URL || 'https://backend.buystore.io';
     const image_url = req.file 
       ? `${baseUrl}/uploads/${req.file.filename}` 
       : (existing_image_url || null);
@@ -204,8 +215,7 @@ app.get('/api/chat/seller/:id/contacts', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
 
-// --- 5. ORDER & CHECKOUT ROUTES ---
-
+// ORDER & CHECKOUT ROUTES
 app.get('/api/products/single/:id', async (req, res) => {
   try {
     const [product] = await pool.execute('SELECT p.*, s.shopName FROM products p JOIN sellers s ON p.seller_id = s.id WHERE p.id = ?', [req.params.id]);
@@ -214,7 +224,6 @@ app.get('/api/products/single/:id', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
 
-// Place a New Order (Checkout) - WITH SHIPPING DETAILS
 app.post('/api/orders', async (req, res) => {
   try {
     const { customer_id, items, shipping_name, shipping_phone, shipping_address } = req.body;
@@ -240,7 +249,6 @@ app.get('/api/orders/customer/:id', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
 
-// Default Seller Orders Route
 app.get('/api/orders/seller/:id', async (req, res) => {
   try {
     const [orders] = await pool.execute('SELECT * FROM orders WHERE seller_id = ? ORDER BY created_at DESC', [req.params.id]);
@@ -249,17 +257,12 @@ app.get('/api/orders/seller/:id', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
 
-// NEW: Get ALL Orders for Seller Dashboard (Received + Placed)
 app.get('/api/orders/seller-all/:id', async (req, res) => {
   try {
-    // Orders they received
     const [receivedOrders] = await pool.execute('SELECT * FROM orders WHERE seller_id = ? ORDER BY created_at DESC', [req.params.id]);
-    // Orders they placed as a customer
     const [placedOrders] = await pool.execute('SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC', [req.params.id]);
     
-    // Combine and sort by date descending
     const allOrders = [...receivedOrders, ...placedOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    
     const [sales] = await pool.execute('SELECT SUM(total_price) as totalSale FROM orders WHERE seller_id = ? AND status != "Cancelled"', [req.params.id]);
     
     res.status(200).json({ orders: allOrders, received: receivedOrders, placed: placedOrders, totalSale: sales[0].totalSale || 0 });
@@ -280,9 +283,7 @@ app.put('/api/orders/status/:id', async (req, res) => {
   }
 });
 
-// --- 6. WITHDRAWAL ROUTES ---
-
-// Submit Withdrawal Request
+// 6. WITHDRAWAL ROUTES
 app.post('/api/withdrawals', async (req, res) => {
   try {
     const { seller_id, amount, payment_method, wallet_address, note } = req.body;
@@ -297,7 +298,6 @@ app.post('/api/withdrawals', async (req, res) => {
   }
 });
 
-// Get Withdrawal History for a Seller
 app.get('/api/withdrawals/seller/:id', async (req, res) => {
   try {
     const [withdrawals] = await pool.execute('SELECT * FROM withdrawals WHERE seller_id = ? ORDER BY created_at DESC', [req.params.id]);
@@ -307,7 +307,6 @@ app.get('/api/withdrawals/seller/:id', async (req, res) => {
     res.status(500).json({ message: 'Server Error' });
   }
 });
-
 
 // Dynamic Port for Live Server
 const PORT = process.env.PORT || 5000;
