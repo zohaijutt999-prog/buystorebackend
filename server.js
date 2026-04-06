@@ -10,10 +10,9 @@ require('dotenv').config();
 
 const app = express();
 
-// Allow cross-origin requests from your live React frontend
-// Allow cross-origin requests ONLY from your buystore.io domain
+// Allow all cross-origin requests for Local Development
 app.use(cors({
-  origin: ['https://buystore.io', 'https://www.buystore.io']
+  origin: ['https://yourwebsite.com', 'https://www.yourwebsite.com'] // Apna live frontend URL dalein
 }));
 app.use(express.json()); 
 
@@ -113,13 +112,17 @@ app.get('/api/seller/products/:sellerId', async (req, res) => {
 
 app.post('/api/seller/products', upload.single('productImage'), async (req, res) => {
   try {
-    const { seller_id, title, category, price, stock_qty, description, profit } = req.body;
+    const { seller_id, title, category, price, stock_qty, description, profit, existing_image_url } = req.body;
     
     // Dynamic Image URL using environment variable
     const baseUrl = process.env.BACKEND_URL || 'http://localhost:5000';
-    const image_url = req.file 
-      ? `${baseUrl}/uploads/${req.file.filename}` 
-      : "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=300&q=80";
+    let image_url = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=300&q=80"; // Default
+    
+    if (req.file) {
+      image_url = `${baseUrl}/uploads/${req.file.filename}`;
+    } else if (existing_image_url) {
+      image_url = existing_image_url;
+    }
 
     const query = `INSERT INTO products (seller_id, title, category, price, stock_qty, description, profit, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
     await pool.execute(query, [seller_id, title, category, price, stock_qty, description, profit, image_url]);
@@ -237,12 +240,33 @@ app.get('/api/orders/customer/:id', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
 
+// Default Seller Orders Route
 app.get('/api/orders/seller/:id', async (req, res) => {
   try {
     const [orders] = await pool.execute('SELECT * FROM orders WHERE seller_id = ? ORDER BY created_at DESC', [req.params.id]);
     const [sales] = await pool.execute('SELECT SUM(total_price) as totalSale FROM orders WHERE seller_id = ? AND status != "Cancelled"', [req.params.id]);
     res.status(200).json({ orders, totalSale: sales[0].totalSale || 0 });
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
+});
+
+// NEW: Get ALL Orders for Seller Dashboard (Received + Placed)
+app.get('/api/orders/seller-all/:id', async (req, res) => {
+  try {
+    // Orders they received
+    const [receivedOrders] = await pool.execute('SELECT * FROM orders WHERE seller_id = ? ORDER BY created_at DESC', [req.params.id]);
+    // Orders they placed as a customer
+    const [placedOrders] = await pool.execute('SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC', [req.params.id]);
+    
+    // Combine and sort by date descending
+    const allOrders = [...receivedOrders, ...placedOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    const [sales] = await pool.execute('SELECT SUM(total_price) as totalSale FROM orders WHERE seller_id = ? AND status != "Cancelled"', [req.params.id]);
+    
+    res.status(200).json({ orders: allOrders, received: receivedOrders, placed: placedOrders, totalSale: sales[0].totalSale || 0 });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server Error' }); 
+  }
 });
 
 app.put('/api/orders/status/:id', async (req, res) => {
