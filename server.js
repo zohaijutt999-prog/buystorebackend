@@ -66,9 +66,9 @@ pool.getConnection()
   .then(() => console.log('✅ Connected to MySQL Database Successfully!'))
   .catch((err) => console.error('❌ MySQL Connection Error:', err));
 
-// --- ROUTES (Same as your logic) ---
+// --- ROUTES ---
 
-// 1. AUTHENTICATION ROUTES
+// 1. AUTHENTICATION & USER ROUTES
 app.post('/api/register/customer', async (req, res) => {
   try {
     const { fullName, email, phoneNumber, password } = req.body;
@@ -106,6 +106,18 @@ app.post('/api/login/seller', async (req, res) => {
     else res.status(401).json({ message: 'Invalid email or password' });
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
+
+// FEATURE: GET ALL REGISTERED CUSTOMERS (For Seller Chat Interface)
+app.get('/api/customers/all', async (req, res) => {
+  try {
+    const [customers] = await pool.execute('SELECT id, fullName, email FROM customers ORDER BY fullName ASC');
+    res.status(200).json(customers);
+  } catch (error) {
+    console.error('Error fetching all customers:', error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
 
 // 2. PRODUCT ROUTES
 app.get('/api/products/all', async (req, res) => {
