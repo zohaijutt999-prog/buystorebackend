@@ -264,7 +264,8 @@ app.get('/api/orders/customer/:id', async (req, res) => {
 app.get('/api/orders/seller/:id', async (req, res) => {
   try {
     const [orders] = await pool.execute('SELECT * FROM orders WHERE seller_id = ? ORDER BY created_at DESC', [req.params.id]);
-    const [sales] = await pool.execute('SELECT SUM(total_price) as totalSale FROM orders WHERE seller_id = ? AND status != "Cancelled"', [req.params.id]);
+    // UPDATE: Only sum sales where status is 'Delivered'
+    const [sales] = await pool.execute('SELECT SUM(total_price) as totalSale FROM orders WHERE seller_id = ? AND status = "Delivered"', [req.params.id]);
     res.status(200).json({ orders, totalSale: sales[0].totalSale || 0 });
   } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
@@ -275,7 +276,8 @@ app.get('/api/orders/seller-all/:id', async (req, res) => {
     const [placedOrders] = await pool.execute('SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC', [req.params.id]);
     
     const allOrders = [...receivedOrders, ...placedOrders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const [sales] = await pool.execute('SELECT SUM(total_price) as totalSale FROM orders WHERE seller_id = ? AND status != "Cancelled"', [req.params.id]);
+    // UPDATE: Only sum sales where status is 'Delivered'
+    const [sales] = await pool.execute('SELECT SUM(total_price) as totalSale FROM orders WHERE seller_id = ? AND status = "Delivered"', [req.params.id]);
     
     res.status(200).json({ orders: allOrders, received: receivedOrders, placed: placedOrders, totalSale: sales[0].totalSale || 0 });
   } catch (error) {
