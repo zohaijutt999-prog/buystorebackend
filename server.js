@@ -14,8 +14,7 @@ const app = express();
 const allowedOrigins = [
   'https://buystore.io',
   'https://www.buystore.io',
-  'http://localhost:5173', // Local development (Vite) ke liye
-  'http://localhost:3000'
+  'https://api.buystore.io'
 ];
 
 app.use(cors({
@@ -63,9 +62,32 @@ const pool = mysql.createPool({
 });
 
 pool.getConnection()
-  .then(() => console.log('✅ Connected to MySQL Database Successfully!'))
+  .then(async (connection) => {
+    console.log('✅ Connected to MySQL Database Successfully!');
+    // Initialize DB tables for Admin if not exists
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS admins (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          password VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      
+      const [admins] = await connection.query('SELECT * FROM admins LIMIT 1');
+      if (admins.length === 0) {
+        // Insert default admin
+        await connection.query('INSERT INTO admins (email, password) VALUES (?, ?)', ['admin@buystore.com', 'admin123']);
+        console.log('✅ Default admin account created: admin@buystore.com / admin123');
+      }
+    } catch (err) {
+      console.error('❌ Error initializing DB:', err);
+    } finally {
+      connection.release();
+    }
+  })
   .catch((err) => console.error('❌ MySQL Connection Error:', err));
-
 // --- ROUTES ---
 
 // 1. AUTHENTICATION & USER ROUTES
@@ -320,6 +342,82 @@ app.get('/api/withdrawals/seller/:id', async (req, res) => {
     console.error(error);
     res.status(500).json({ message: 'Server Error' });
   }
+});
+
+// ================= ADMIN ROUTES =================
+app.post('/api/login/admin', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const [admins] = await pool.execute('SELECT id, email FROM admins WHERE email = ? AND password = ?', [email, password]);
+    if (admins.length > 0) res.status(200).json({ message: 'Login successful', user: { ...admins[0], role: 'admin' } });
+    else res.status(401).json({ message: 'Invalid email or password' });
+  } catch (error) { res.status(500).json({ message: 'Server Error' }); }
+});
+
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    const [[{ totalCustomers }]] = await pool.execute('SELECT COUNT(*) as totalCustomers FROM customers');
+    const [[{ totalSellers }]] = await pool.execute('SELECT COUNT(*) as totalSellers FROM sellers');
+    const [[{ totalOrders }]] = await pool.execute('SELECT COUNT(*) as totalOrders FROM orders');
+    const [[{ totalRevenue }]] = await pool.execute('SELECT SUM(total_price) as totalRevenue FROM orders WHERE status = "Delivered"');
+    
+    res.status(200).json({
+      customers: totalCustomers,
+      sellers: totalSellers,
+      orders: totalOrders,
+      revenue: totalRevenue || 0
+    });
+  } catch (error) { res.status(500).json({ message: 'Server Error' }); }
+});
+
+app.get('/api/admin/customers', async (req, res) => {
+  try {
+    const [customers] = await pool.execute('SELECT id, fullName, email, phoneNumber, created_at FROM customers ORDER BY created_at DESC');
+    res.status(200).json(customers);
+  } catch (error) { res.status(500).json({ message: 'Server Error' }); }
+});
+
+app.get('/api/admin/sellers', async (req, res) => {
+  try {
+    const [sellers] = await pool.execute('SELECT id, fullName, email, phoneNumber, shopName, created_at FROM sellers ORDER BY created_at DESC');
+    res.status(200).json(sellers);
+  } catch (error) { res.status(500).json({ message: 'Server Error' }); }
+});
+
+app.get('/api/admin/orders', async (req, res) => {
+  try {
+    const [orders] = await pool.execute(`
+      SELECT o.*, s.shopName, s.fullName as sellerName, s.email as sellerEmail, c.fullName as customerName, c.email as customerEmail
+      FROM orders o
+      LEFT JOIN sellers s ON o.seller_id = s.id
+      LEFT JOIN customers c ON o.customer_id = c.id
+      ORDER BY o.created_at DESC
+    `);
+    res.status(200).json(orders);
+  } catch (error) {
+    console.error('Error fetching admin orders:', error);
+    res.status(500).json({ message: 'Server Error' });
+  }
+});
+
+app.get('/api/admin/withdrawals', async (req, res) => {
+  try {
+    const [withdrawals] = await pool.execute(`
+      SELECT w.*, s.shopName, s.email 
+      FROM withdrawals w 
+      JOIN sellers s ON w.seller_id = s.id 
+      ORDER BY w.created_at DESC
+    `);
+    res.status(200).json(withdrawals);
+  } catch (error) { res.status(500).json({ message: 'Server Error' }); }
+});
+
+app.put('/api/admin/withdrawals/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    await pool.execute('UPDATE withdrawals SET status = ? WHERE id = ?', [status, req.params.id]);
+    res.status(200).json({ message: 'Withdrawal status updated' });
+  } catch (error) { res.status(500).json({ message: 'Server Error' }); }
 });
 
 // Dynamic Port for Live Server
