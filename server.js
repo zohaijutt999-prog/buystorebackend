@@ -14,6 +14,7 @@ const app = express();
 const allowedOrigins = [
   'https://buystore.io',
   'https://www.buystore.io',
+  'https://backend.buystore.io',
   'https://api.buystore.io'
 ];
 
